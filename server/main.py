@@ -2,21 +2,31 @@
 main.py — FastAPI backend for Logic-stics Digital Twin.
 """
 import asyncio, os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Path adjustment to find modules regardless of folder name
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 
-from backend.simulation_engine import SimulationEngine
+# 🚨 DHYAN DIJIYE: Yahan humne folder name ki dependency hata di hai
+try:
+    from simulation_engine import SimulationEngine
+except ImportError:
+    from server.simulation_engine import SimulationEngine
 
 app = FastAPI(title="Logic-stics", description="Predictive Logistics Digital Twin API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
-# Global simulation engine (initialized on startup)
+# Global simulation engine
 engine: Optional[SimulationEngine] = None
 
 class DisruptionRequest(BaseModel):
@@ -45,12 +55,10 @@ def health():
 
 @app.get("/api/snapshot")
 def get_snapshot():
-    """Full current state of the simulation."""
     return engine.get_snapshot()
 
 @app.get("/api/graph")
 def get_graph():
-    """Return graph topology for map rendering."""
     import numpy as np
     adj = engine.adj
     nodes = []
@@ -70,34 +78,28 @@ def get_graph():
 
 @app.get("/api/predict")
 def get_prediction():
-    """Latest GNN prediction results."""
     return engine.current_prediction or {"message": "No prediction yet"}
 
 @app.get("/api/fleet")
 def get_fleet():
-    """Current fleet status."""
     return engine.fleet.get_state()
 
 @app.post("/api/disruption")
 def inject_disruption(req: DisruptionRequest):
-    """Inject a disruption event."""
     return engine.inject_disruption(req.node_id, req.severity, req.radius,
                                     req.duration, req.event_type)
 
 @app.post("/api/speed")
 def set_speed(req: SpeedRequest):
-    """Set simulation speed multiplier."""
     engine.set_speed(req.multiplier)
     return {"speed_multiplier": engine.speed_multiplier}
 
 @app.post("/api/route")
 def compute_route(req: RouteRequest):
-    """Compare static vs dynamic routing."""
     return engine.router.compare_routes(req.origin, req.destination, engine.step_count)
 
 @app.get("/api/events")
 def get_events(limit: int = Query(default=50)):
-    """Recent simulation events."""
     return {"events": engine.event_log[-limit:]}
 
 @app.websocket("/ws/live")
@@ -106,12 +108,12 @@ async def websocket_endpoint(ws: WebSocket):
     engine.websocket_clients.append(ws)
     try:
         while True:
-            await ws.receive_text()  # keep-alive
+            await ws.receive_text()
     except WebSocketDisconnect:
         if ws in engine.websocket_clients:
             engine.websocket_clients.remove(ws)
 
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    # Local testing ke liye
+    uvicorn.run(app, host="0.0.0.0", port=8000)
