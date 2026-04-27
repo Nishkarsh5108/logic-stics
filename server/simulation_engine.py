@@ -1,11 +1,12 @@
 """
 simulation_engine.py — Orchestrates the full digital twin simulation loop.
 HYBRID VERSION: 1x = Live Sync, >1x = Predictive Fast-Forward.
+FIXED: Added safety check for websocket client removal to prevent crash.
 """
 import time, threading, json, numpy as np, asyncio, httpx, datetime
-from typing import Optional
-
 import sys, os
+
+# Add parent dir to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.graph_builder import build_synthetic_grid
@@ -25,17 +26,17 @@ class SimulationEngine:
         self.num_nodes = n * n
 
         # 1) Build graph
-        print("[SimEngine] Building graph …")
+        print("[SimEngine] Building graph ...")
         self.adj, self.node_features = build_synthetic_grid(n, n, out_dir="data/raw")
 
         # 2) Generate synthetic training data & train if needed
         if not os.path.exists("data/processed/train.npz"):
-            print("[SimEngine] Generating synthetic traffic data …")
+            print("[SimEngine] Generating synthetic traffic data ...")
             generate_synthetic_traffic(self.num_nodes, num_steps=12 * 288,
                                        out_dir="data/processed")
 
         # 3) Load predictor
-        print("[SimEngine] Loading predictor …")
+        print("[SimEngine] Loading predictor ...")
         self.predictor = Predictor(
             checkpoint_path="model/checkpoints/best_model.pt",
             adj_path="data/raw/graph_data.pkl",
@@ -53,11 +54,11 @@ class SimulationEngine:
         # State
         self.running = False
         
-        # ✅ HYBRID TIME ENGINE VARIABLES
+        # HYBRID TIME ENGINE VARIABLES
         self.speed_multiplier = 1   
-        self.tick_interval = 2.0    # Browser smooth rakhne ke liye hamesha 2 sec
+        self.tick_interval = 2.0    
         self.current_sim_time = datetime.datetime.now()
-        self.is_live_synced = True  # 1x par True, baki par False
+        self.is_live_synced = True  
         
         self.current_prediction = None
         self.event_log: list[dict] = []
@@ -85,23 +86,20 @@ class SimulationEngine:
                 if response.status_code == 200:
                     data = response.json()
                     speed = data['flowSegmentData']['currentSpeed']
-                    # Add a tiny bit of jitter so the UI looks 'alive'
                     jitter = np.random.uniform(-0.4, 0.4)
                     return float(speed) + jitter
         except Exception as e:
             print(f"[TomTom] Error: {e}")
         return self.last_real_speed
 
-    # ✅ UNLOCKED SPEED CONTROLS
     def set_speed(self, multiplier: int):
         self.speed_multiplier = max(1, min(multiplier, 100))
         if self.speed_multiplier == 1:
             self.is_live_synced = True
-            self.current_sim_time = datetime.datetime.now() # Wapas present me aa jao
+            self.current_sim_time = datetime.datetime.now() 
         else:
             self.is_live_synced = False
 
-    # ✅ ADDED BACK FOR YOUR UI BUTTON
     def inject_disruption(self, node_id: int, severity: float = 0.2,
                           radius: int = 3, duration: int = 24,
                           event_type: str = "accident") -> dict:
@@ -115,28 +113,22 @@ class SimulationEngine:
 
     async def _run_tick(self) -> dict:
         """Execute one simulation tick with Hybrid Time."""
-        
-        # 1) SYNC OR FAST-FORWARD TIME
         if self.is_live_synced:
             self.current_sim_time = datetime.datetime.now()
         else:
-            # Future me travel karein: e.g., at 60x, jump 120 seconds ahead every tick
             delta = datetime.timedelta(seconds=self.tick_interval * self.speed_multiplier)
             self.current_sim_time += delta
 
         time_decimal = self.current_sim_time.hour + (self.current_sim_time.minute / 60.0)
         day_of_week = self.current_sim_time.weekday()
 
-        # 2) FETCH TOMTOM: Every 10 steps
         if self.step_count % 5 == 0:
             self.last_real_speed = await self._fetch_tomtom_speed()
 
-        # 3) ADVANCE TRAFFIC
         speeds = self.traffic_sim.tick()
         speeds[0] = self.last_real_speed 
         self.step_count += 1
 
-        # 4) PREDICT
         bottleneck_nodes = []
         if self.step_count % 3 == 0:
             history = self.traffic_sim.get_history_tensor(lookback=12)
@@ -144,12 +136,10 @@ class SimulationEngine:
                 self.current_prediction = self.predictor.predict(history)
                 bottleneck_nodes = self.current_prediction["bottleneck_nodes"]
 
-        # 5) FLEET
         self.router.update_speeds(speeds)
         fleet_events = self.fleet.tick(speeds, bottleneck_nodes)
         self.event_log.extend(fleet_events)
 
-        # 6) SNAPSHOT
         state = {
             "step": self.step_count,
             "traffic": {
@@ -169,22 +159,29 @@ class SimulationEngine:
         return state
 
     async def run_loop(self):
+        """Main simulation loop with safe WebSocket handling."""
         self.running = True
         while self.running:
-            state = await self._run_tick()
-            msg = json.dumps(state, default=str)
-            
-            dead = []
-            for ws in self.websocket_clients:
-                try:
-                    await ws.send_text(msg)
-                except:
-                    dead.append(ws)
-            for ws in dead:
-                self.websocket_clients.remove(ws)
+            try:
+                state = await self._run_tick()
+                msg = json.dumps(state, default=str)
+                
+                dead = []
+                # Attempt to send message to all connected clients
+                for ws in self.websocket_clients:
+                    try:
+                        await ws.send_text(msg)
+                    except Exception:
+                        dead.append(ws)
+                
+                # SAFE REMOVAL: Fixed the 'list.remove(x): x not in list' error
+                for ws in dead:
+                    if ws in self.websocket_clients:
+                        self.websocket_clients.remove(ws)
 
-            # Wait exactly 2 seconds regardless of speed multiplier. 
-            # Time travel is handled by the math above, not by making the loop run crazily fast.
+            except Exception as e:
+                print(f"[SimLoop Error] {e}")
+            
             await asyncio.sleep(self.tick_interval)
 
     def stop(self):
