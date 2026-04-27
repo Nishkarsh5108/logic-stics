@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://logic-stics.onrender.com';
-const WS_URL = import.meta.env.VITE_WS_URL || 'wss://https://logic-stics.onrender.com/ws/live';
+const API_BASE = 'https://logic-stics.onrender.com';
+const WS_URL = 'wss://logic-stics.onrender.com/ws/live';
 export interface SimState {
   step: number;
   traffic: {
@@ -28,6 +28,10 @@ export interface SimState {
   };
   events: SimEvent[];
   bottleneck_nodes: number[];
+  // YE CHAR LINES ADD KARNI HAIN:
+  live_anchor_speed?: number;
+  is_live_synced?: boolean;
+  speed_multiplier?: number;
 }
 
 export interface Vehicle {

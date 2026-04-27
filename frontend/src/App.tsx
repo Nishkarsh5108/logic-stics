@@ -6,13 +6,16 @@ import AlertFeed from './components/AlertFeed';
 import KPIDashboard from './components/KPIDashboard';
 import './index.css';
 
+// Yeh configuration aap hook mein bhi rakh sakte hain ya yahan se pass kar sakte hain
 export default function App() {
+  // useSimulation hook ke andar humne wss:// aur https:// set kar diya hai
   const { state, graph, connected, events, injectDisruption, setSpeed } = useSimulation();
   const [disruptionMode, setDisruptionMode] = useState(false);
 
   const handleNodeClick = useCallback((nodeId: number) => {
     if (disruptionMode) {
-      injectDisruption(nodeId, 0.05, 'accident');  // 0.05 = 5% of normal speed (gridlock)
+      // 0.05 = 5% of normal speed (gridlock simulation)
+      injectDisruption(nodeId, 0.05, 'accident');  
       setDisruptionMode(false);
     }
   }, [disruptionMode, injectDisruption]);
@@ -33,25 +36,24 @@ export default function App() {
         </div>
         
         <div className="header-status">
-          {/* ✅ Live TomTom Speed Badge */}
           <div className="status-badge">
-            📍 Live DU Speed: {state?.live_anchor_speed ? Math.round(state.live_anchor_speed) : '--'} km/h
+             Live DU Speed: {state?.live_anchor_speed ? Math.round(state.live_anchor_speed) : '--'} km/h
           </div>
           
-          {/* ✅ DYNAMIC STATUS: Changes based on 1x vs Fast-Forward */}
           <div className={`status-badge ${state?.is_live_synced === false ? 'simulating-glow' : ''}`}>
+            {/* Connected status dot updates automatically based on WebSocket state */}
             <span className={`status-dot ${connected ? (state?.is_live_synced !== false ? 'live' : 'warning') : 'danger'}`} />
             {connected 
-              ? (state?.is_live_synced !== false ? 'Live Sync' : `Simulating at ${state?.speed_multiplier || 1}x`) 
-              : 'Reconnecting…'}
+              ? (state?.is_live_synced !== false ? 'Cloud Sync: Active' : `Simulating at ${state?.speed_multiplier || 1}x`) 
+              : 'Connecting to Render Server…'}
           </div>
 
           <div className="status-badge">
-            🧠 ASTGCN Active
+             ASTGCN ML Active
           </div>
 
           <div className="status-badge">
-            📡 {state?.bottleneck_nodes?.length || 0} Bottlenecks Predicted
+             {state?.bottleneck_nodes?.length || 0} Bottlenecks Predicted
           </div>
         </div>
       </header>
@@ -64,7 +66,6 @@ export default function App() {
           onDisruptionModeToggle={() => setDisruptionMode(m => !m)}
           disruptionMode={disruptionMode}
           step={state?.step || 0}
-          /* ✅ SYNCED TIME: Ab ye real clock se match karega */
           timeOfDay={state?.traffic?.time_of_day ?? traffic?.time_of_day ?? 0}
           dayOfWeek={state?.traffic?.day_of_week ?? traffic?.day_of_week ?? 0}
         />
@@ -85,7 +86,6 @@ export default function App() {
         <AlertFeed
           events={events}
           bottleneckCount={state?.bottleneck_nodes?.length || 0}
-          /* ✅ Uses Real-Time TomTom speed as primary KPI */
           meanSpeed={state?.live_anchor_speed || (traffic?.speeds ? traffic.speeds.reduce((a, b) => a + b, 0) / traffic.speeds.length : 50)}
         />
       </aside>
