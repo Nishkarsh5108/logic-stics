@@ -98,14 +98,27 @@ def get_fleet():
         return engine.fleet.get_state()
     return {"vehicles": [], "active_count": 0}
 
+import asyncio # File ke upar check kar lena ki 'import asyncio' hai (waise humne already add kiya tha)
+
 @app.post("/api/disruption")
-def inject_disruption(req: DisruptionRequest):
-    return engine.inject_disruption(req.node_id, req.severity, req.radius,
-                                    req.duration, req.event_type)
+async def inject_disruption(req: DisruptionRequest):
+    try:
+        # Action perform karein
+        res = engine.inject_disruption(req.node_id, req.severity, req.radius, req.duration, req.event_type)
+        
+        # Agar function async nikla, toh usko await karein
+        if asyncio.iscoroutine(res):
+            await res
+            
+        # Pura object return karne ke bajaye, ek simple success dictionary return karein
+        return {"status": "success", "message": "Disruption applied!", "node_id": req.node_id}
+    except Exception as e:
+        print(f"Disruption API Error: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.post("/api/speed")
-def set_speed(req: SpeedRequest):
-    engine.set_speed(req.multiplier)
+async def set_speed(req: SpeedRequest):
+    await asyncio.to_thread(engine.set_speed, req.multiplier)
     return {"speed_multiplier": getattr(engine, 'speed_multiplier', req.multiplier)}
 
 @app.post("/api/route")
